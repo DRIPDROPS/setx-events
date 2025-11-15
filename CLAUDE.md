@@ -46,12 +46,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │   - event_sources       │
 │   - scrape_log          │
 └─────────────────────────┘
+         ▲
+         │ POST /api/events
+         │
+┌────────┴──────────────────┐
+│  Agent Orchestrator       │
+│  (localhost:3005)         │
+│  - Memory System          │
+│  - Learning Agent         │
+│  - Coordinates scrapers   │
+└────────┬──────────────────┘
+         │
+         ├─► n8n Workflows (daily @6am, port 5678)
+         ├─► Perplexity AI (smart web search)
+         └─► Ollama (local LLM, port 11434)
 
-Scrapers (Feed Data Into API):
-- n8n Workflows (daily @6am)
-- Perplexity AI (smart web search)
-- Ollama (local free LLM)
+Data Flow:
+1. Scrapers discover events from venue websites
+2. Agent Orchestrator validates and coordinates
+3. POST to REST API (/api/events)
+4. API saves to SQLite with deduplication
+5. Frontend fetches and displays events
 ```
+
+**Project Path:** `/home/user/setx-events/`
 
 ## Database Schema Quick Reference
 
@@ -68,15 +86,38 @@ Scrapers (Feed Data Into API):
 ## Directory Structure
 
 ```
-/home/sauly/setx-events/
+/home/user/setx-events/
 ├── CORE APPLICATION FILES
-│   ├── api-server.js              Express REST API server (main backend)
+│   ├── api-server.js              Express REST API server (main backend, port 3001)
 │   ├── index.js                   Ollama daily scraper entry point
 │   ├── ai-scraper.js              Perplexity API-powered scraper
 │   ├── venue-scraper.js           Intelligent venue-focused scraper
 │   ├── event-validator.js         Event data validation utility
 │   ├── cleanup-dates.js           Date normalization utility
 │   └── delete-past-events.js      Past event cleanup script
+│
+├── AGENT ORCHESTRATION & AI
+│   ├── agent-orchestrator.js      Universal MCP service hub (port 3005)
+│   ├── ollama-memory.js           AI memory system for learning patterns
+│   ├── ollama-agent-learner.js    Learning agent for venue discovery
+│   └── local-agent-controller.js  Local agent coordination
+│
+├── VENUE & IMAGE MANAGEMENT
+│   ├── venue-service.js           Venue service layer
+│   ├── venue-api-routes.js        Venue API route handlers
+│   ├── dashboard-server.js        Dashboard backend server
+│   ├── handle-recurring-events.js Recurring event processing
+│   ├── scrape-event-images.js     Event image scraping
+│   ├── scrape-venue-websites-for-images.js  Venue website image extraction
+│   ├── add-missing-venue-images.js          Add missing venue images
+│   ├── add-remaining-venue-images.js        Complete venue image collection
+│   ├── fast-venue-image-downloader.js       Fast image downloading
+│   ├── create-placeholder-images.js         Generate placeholder images
+│   ├── deduplicate-and-complete-images.js   Image deduplication
+│   ├── perplexity-venue-images.js           AI-powered image discovery
+│   ├── find-real-venue-photos.js            Find authentic venue photos
+│   ├── verify-venue-images.js               Image verification utility
+│   └── fix-event-source-urls.js             Fix broken source URLs
 │
 ├── FRONTEND APPLICATION
 │   └── public/
@@ -85,54 +126,103 @@ Scrapers (Feed Data Into API):
 │       ├── venue.html             Single venue detail page
 │       ├── venue-admin.html       Venue administration interface
 │       ├── dashboard.html         Event statistics dashboard
+│       ├── live-dashboard.html    Real-time dashboard
+│       ├── simple-dashboard.html  Simplified dashboard view
 │       ├── event.html             Event detail page
 │       └── images/                Venue and event image storage
 │
 ├── AUTOMATION & SCRIPTS
 │   ├── restart-all.sh             Start all services (recommended)
+│   ├── start-all.sh               Alternative startup script
 │   ├── daily-scrape.sh            Daily scraping job for cron
 │   ├── setup-cron.sh              Configure cron jobs
 │   ├── setup-n8n-workflow.sh      Setup n8n workflows
 │   ├── complete-setup.sh          Full installation from scratch
+│   ├── install-everything.sh      Complete system installation
+│   ├── populate-events.sh         Populate database with events
+│   ├── check_venue_status.sh      Check venue status
+│   ├── cleanup-experimental-files.sh  Clean experimental files
+│   ├── integrate-backup.sh        Integrate backup database
 │   └── n8n-workflows/             n8n workflow definitions
 │
-├── IMAGE PROCESSING
-│   ├── add-missing-venue-images.js
-│   ├── fast-venue-image-downloader.js
-│   ├── create-placeholder-images.js
-│   └── verify-venue-images.js
-│
 ├── DATABASE & CONFIGURATION
-│   ├── database.sqlite            SQLite database file
+│   ├── database.sqlite            SQLite database file (active)
+│   ├── database.sqlite.before-merge  Reference backup
 │   ├── package.json               NPM dependencies
 │   ├── package-lock.json          Dependency lock file
 │   └── backups/                   Database backup directory
 │
 ├── LOGS & MONITORING
-│   └── logs/                      Application logs (api-server.log, etc.)
+│   ├── logs/                      Application logs (api-server.log, etc.)
+│   ├── scrape.log                 Scraping operation logs
+│   └── memory-system/             AI memory persistence
 │
 └── DOCUMENTATION
     ├── README.md                  Project overview
     ├── CLAUDE.md                  This file (Claude Code guidance)
+    ├── QUICK_START.md             Quick start guide
     ├── ARCHITECTURE.md            Detailed technical architecture
-    └── SYSTEM-MAP.md              Comprehensive system documentation
+    ├── SYSTEM-MAP.md              Comprehensive system documentation
+    ├── VENUE-SYSTEM-GUIDE.md      Venue management guide
+    ├── GITHUB-PUSH-GUIDE.md       Git workflow guide
+    ├── GEMINI.md                  Gemini AI integration notes
+    └── Various audit/cleanup reports
 ```
 
 ## Key Files & Their Purpose
 
+**Core Services:**
 | File | Purpose |
 |------|---------|
 | `api-server.js` | Express REST API server (port 3001) with event/venue CRUD |
+| `agent-orchestrator.js` | Universal MCP service hub (port 3005) for agent coordination |
+| `dashboard-server.js` | Dashboard backend server with real-time stats |
+
+**Scrapers & AI:**
+| File | Purpose |
+|------|---------|
 | `index.js` | Ollama-powered daily event scraper (free local AI) |
 | `ai-scraper.js` | Perplexity API-powered smart scraper (web search-based) |
-| `venue-scraper.js` | Intelligent venue-focused scraper (462 lines) |
+| `venue-scraper.js` | Intelligent venue-focused scraper |
+| `ollama-memory.js` | AI memory system for learning scraping patterns |
+| `ollama-agent-learner.js` | Learning agent that improves over time |
+| `local-agent-controller.js` | Coordinates local AI agents |
+
+**Venue & Image Management:**
+| File | Purpose |
+|------|---------|
+| `venue-service.js` | Venue service layer with business logic |
+| `venue-api-routes.js` | Venue API route handlers |
+| `handle-recurring-events.js` | Processes recurring event patterns |
+| `scrape-event-images.js` | Scrapes images for events |
+| `scrape-venue-websites-for-images.js` | Extracts images from venue websites |
+| `perplexity-venue-images.js` | AI-powered venue image discovery |
+| `verify-venue-images.js` | Validates downloaded images |
+
+**Utilities:**
+| File | Purpose |
+|------|---------|
+| `event-validator.js` | Validates event data before insertion |
+| `cleanup-dates.js` | Normalizes date formats |
+| `delete-past-events.js` | Cleanup script for expired events |
+| `fix-event-source-urls.js` | Repairs broken source URLs |
+
+**Frontend:**
+| File | Purpose |
+|------|---------|
 | `public/index.html` | Main SPA - interactive calendar and event browser |
-| `database.sqlite` | SQLite database file (auto-created on first run) |
+| `public/venues.html` | Venue management interface |
+| `public/dashboard.html` | Event statistics dashboard |
+| `public/live-dashboard.html` | Real-time dashboard with live updates |
+
+**Infrastructure:**
+| File | Purpose |
+|------|---------|
 | `restart-all.sh` | Restarts API, frontend, and n8n services |
+| `database.sqlite` | SQLite database file (active) |
+| `database.sqlite.before-merge` | Reference backup before major changes |
 | `n8n-workflows/` | Automated n8n workflow definitions |
 | `logs/` | Application logs (api-server.log, n8n.log, etc.) |
-| `event-validator.js` | Validates event data before insertion |
-| `delete-past-events.js` | Cleanup script for expired events |
 
 ## Development Commands
 
@@ -336,6 +426,32 @@ Environment variables control behavior:
 - `OLLAMA_URL` - Points to local Ollama (default: localhost:11434)
 - `PORT` - API port (default: 3001)
 
+### 5. Agent Orchestration & Memory System
+The application includes an advanced AI agent system:
+- **Agent Orchestrator** (`agent-orchestrator.js`) - Central hub running on port 3005 that coordinates all AI agents
+- **Memory System** (`ollama-memory.js`) - Persistent memory that learns from scraping patterns and improves accuracy
+- **Learning Agent** (`ollama-agent-learner.js`) - Continuously learns venue discovery patterns
+- **Local Controller** (`local-agent-controller.js`) - Manages local Ollama instances
+
+**How it works:**
+1. Cloud agents (Perplexity) discover new venues
+2. Local agents (Ollama) validate and scrape events
+3. n8n workflow automates daily execution
+4. Memory system stores successful patterns
+5. Learning agent adapts strategies over time
+
+**Memory persistence:** `/memory-system/` directory stores learned patterns as JSON files
+
+## Service Ports Reference
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| API Server | 3001 | Main REST API |
+| Agent Orchestrator | 3005 | AI agent coordination |
+| Frontend | 8081-8083 | Web interface (tries ports in sequence) |
+| n8n | 5678 | Workflow automation |
+| Ollama | 11434 | Local LLM server |
+
 ## Common Development Tasks
 
 ### Add a New API Endpoint
@@ -358,11 +474,142 @@ Environment variables control behavior:
 5. Log results to `scrape_log` table
 
 ### Update Frontend
-1. Edit `public/index.html` (single file SPA)
+1. Edit files in `public/` directory (HTML/CSS/JavaScript single files)
 2. Uses vanilla JS with fetch API for REST calls
-3. CSS included in `<style>` tag
-4. No build step required
-5. Auto-reloads in browser
+3. CSS embedded in `<style>` tags
+4. No build step required - refresh browser to see changes
+5. All pages are static HTML that communicate with REST API
+
+### Work with Venue/Event Images
+The project includes multiple image management utilities:
+
+**Add missing venue images:**
+```bash
+node add-missing-venue-images.js        # Standard approach
+node add-remaining-venue-images.js      # Complete any remaining
+node fast-venue-image-downloader.js     # Fast bulk download
+```
+
+**Find and verify images:**
+```bash
+node find-real-venue-photos.js          # Search for authentic venue photos
+node perplexity-venue-images.js         # AI-powered image discovery
+node verify-venue-images.js             # Validate existing images
+```
+
+**Process and clean up images:**
+```bash
+node deduplicate-and-complete-images.js # Remove duplicates
+node create-placeholder-images.js       # Generate placeholders
+node scrape-event-images.js             # Scrape event images
+node scrape-venue-websites-for-images.js # Extract from websites
+```
+
+**Images stored in:** `public/images/`
+
+### Start Agent Orchestrator
+The agent orchestrator coordinates AI scrapers:
+```bash
+node agent-orchestrator.js
+# Runs on http://localhost:3005
+# Coordinates Ollama + Perplexity + n8n
+```
+
+Check agent status:
+```bash
+curl http://localhost:3005/api/status
+```
+
+### Work with Recurring Events
+Process recurring event patterns:
+```bash
+node handle-recurring-events.js
+```
+
+This script:
+- Identifies recurring event patterns
+- Eliminates duplicate occurrences
+- Consolidates to single entries with recurrence info
+
+### Debug API Issues
+When the API server isn't working:
+```bash
+# Check API health
+curl http://localhost:3001/api/health
+
+# View logs in real-time
+tail -f logs/api-server.log
+
+# Check if API is running
+ps aux | grep "node api-server"
+
+# Verify database connection
+sqlite3 database.sqlite ".tables"
+
+# Check port availability
+lsof -i :3001
+
+# Restart API
+./restart-all.sh
+```
+
+### Debug Frontend Issues
+When the frontend isn't loading properly:
+```bash
+# Check if frontend server is running
+lsof -i :8081
+
+# Verify API is accessible
+curl http://localhost:3001/api/health
+
+# View frontend logs
+tail -f logs/frontend.log
+```
+
+**Browser debugging:**
+1. Open DevTools (F12)
+2. Check Console tab for JavaScript errors
+3. Check Network tab to see API request/response
+4. Verify API endpoint returns data
+5. Clear browser cache: `Ctrl+Shift+Delete`
+
+### Debug Scraper Issues
+When scrapers fail or return no events:
+```bash
+# Test Ollama connection
+curl http://localhost:11434/api/tags
+
+# Test Perplexity API (requires API key)
+curl https://api.perplexity.ai/chat/completions \
+  -H "Authorization: Bearer $PERPLEXITY_API_KEY"
+
+# Check scrape logs
+tail -f scrape.log
+tail -f logs/n8n.log
+
+# Verify venues in database
+sqlite3 database.sqlite "SELECT COUNT(*) FROM venues WHERE is_active=1;"
+
+# Check recent scrape activity
+sqlite3 database.sqlite "SELECT * FROM scrape_log ORDER BY timestamp DESC LIMIT 5;"
+```
+
+### Debug Agent Orchestrator
+When agent coordination fails:
+```bash
+# Check agent orchestrator status
+curl http://localhost:3005/api/status
+
+# View agent orchestrator logs
+ps aux | grep "node agent-orchestrator"
+
+# Check memory system
+ls -la memory-system/
+
+# Restart orchestrator
+pkill -f "node agent-orchestrator"
+node agent-orchestrator.js > logs/orchestrator.log 2>&1 &
+```
 
 ## Important Implementation Details
 
@@ -477,10 +724,29 @@ All services managed by systemd/shell scripts. Database is file-based (no extern
 
 ## Documentation Structure
 
-- **README.md** - Project overview and quick start
-- **This file (CLAUDE.md)** - Developer guidance for Claude Code
-- **API Endpoints** - All defined in `api-server.js:80+`
-- **Database** - Schema initialization in `api-server.js:200+`
+The project includes extensive documentation:
+
+**Primary Documentation:**
+- **README.md** - Project overview, features, quick start
+- **CLAUDE.md** (this file) - Developer guidance for Claude Code
+- **QUICK_START.md** - Get running in 30 seconds
+- **ARCHITECTURE.md** - Detailed technical architecture
+- **SYSTEM-MAP.md** - Comprehensive system documentation
+
+**Specialized Guides:**
+- **VENUE-SYSTEM-GUIDE.md** - Venue management system guide
+- **GITHUB-PUSH-GUIDE.md** - Git workflow and deployment guide
+- **GEMINI.md** - Google Gemini AI integration notes
+
+**Audit & Cleanup Reports:**
+- **AUDIT-README.md** - Data audit procedures
+- **CLEANUP-REPORT.md** - Database cleanup reports
+- **VENUE-DATA-AUDIT-REPORT.md** - Venue data quality audit
+
+**Code Documentation:**
+- API Endpoints: All defined in `api-server.js:38+`
+- Database Schema: Initialization in `api-server.js:200+`
+- Agent System: `agent-orchestrator.js:0+`
 
 ## Useful Patterns in the Codebase
 
@@ -525,48 +791,6 @@ fetch('/api/events?city=Beaumont')
     .then(data => updateUI(data.data))
     .catch(err => console.error('API error:', err));
 ```
-
-## Common Development Tasks
-
-### Add a New API Endpoint
-1. Add route handler in `api-server.js` (follows RESTful pattern)
-2. Use parameterized queries: `db.all(sql, params, callback)` - never string concatenation
-3. Return JSON: `res.json({ data })` or `res.status(500).json({ error })`
-4. Test with curl before committing
-
-### Modify Database Schema
-1. Update SQL in `api-server.js` (look for CREATE TABLE statements around line 200+)
-2. No migrations framework - this is a small SQLite app
-3. Backup `database.sqlite` before making schema changes
-4. If database already exists, delete it and restart to recreate schema: `rm database.sqlite && node api-server.js`
-
-### Add New Scraping Source
-1. Create module following pattern of `index.js` (Ollama) or `ai-scraper.js` (Perplexity)
-2. Fetch venue data: `const venues = await fetch('http://localhost:3001/api/venues')`
-3. Extract events from venue websites
-4. POST events to API: `POST http://localhost:3001/api/events` with required fields
-5. Log results to `scrape_log` table via API
-
-### Update Frontend
-1. Edit files in `public/` directory (HTML/CSS/JavaScript single files)
-2. Use vanilla JS with fetch API for REST calls
-3. CSS embedded in `<style>` tags
-4. No build step required - refresh browser to see changes
-5. All pages are static HTML that communicate with REST API
-
-### Debug API Issues
-1. Start API with logging: `node api-server.js`
-2. Test endpoint: `curl http://localhost:3001/api/health`
-3. Check logs: `tail -f logs/api-server.log`
-4. Verify database: `sqlite3 database.sqlite ".tables"`
-5. Check ports: `lsof -i :3001`
-
-### Debug Frontend Issues
-1. Open browser DevTools (F12)
-2. Check Console tab for JavaScript errors
-3. Check Network tab to see API requests
-4. Verify API server is running: `curl http://localhost:3001/api/health`
-5. Clear browser cache: `Ctrl+Shift+Delete`
 
 ## Production Deployment Notes
 
