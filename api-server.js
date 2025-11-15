@@ -2,6 +2,7 @@ const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const path = require('path');
+const { chatWithAgent } = require('./history-chat-agent');
 
 const app = express();
 const PORT = 3001;
@@ -375,6 +376,10 @@ app.get('/dashboard', (req, res) => {
     res.sendFile(path.join(__dirname, 'public/dashboard.html'));
 });
 
+app.get('/history', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public/history.html'));
+});
+
 // ==================== ADMIN ROUTES ====================
 
 app.get('/admin', (req, res) => {
@@ -541,6 +546,376 @@ app.get('/api/dashboard/stats', (req, res) => {
             });
         });
     });
+});
+
+// ==================== HISTORICAL DATA ROUTES ====================
+
+// Get all cities
+app.get('/api/history/cities', (req, res) => {
+    db.all('SELECT * FROM historical_cities ORDER BY name ASC', [], (err, rows) => {
+        if (err) {
+            res.status(500).json({ error: err.message });
+        } else {
+            res.json(rows);
+        }
+    });
+});
+
+// Get city by ID with related facts
+app.get('/api/history/cities/:id', (req, res) => {
+    const { id } = req.params;
+    db.get('SELECT * FROM historical_cities WHERE id = ?', [id], (err, city) => {
+        if (err) {
+            res.status(500).json({ error: err.message });
+        } else if (!city) {
+            res.status(404).json({ error: 'City not found' });
+        } else {
+            // Get facts for this city
+            db.all(
+                `SELECT hf.*, ht.name as topic_name, ht.icon as topic_icon
+                 FROM historical_facts hf
+                 LEFT JOIN historical_topics ht ON hf.topic_id = ht.id
+                 WHERE hf.city_id = ?
+                 ORDER BY hf.event_year DESC`,
+                [id],
+                (err, facts) => {
+                    city.facts = facts || [];
+                    res.json(city);
+                }
+            );
+        }
+    });
+});
+
+// Get all topics
+app.get('/api/history/topics', (req, res) => {
+    db.all('SELECT * FROM historical_topics ORDER BY name ASC', [], (err, rows) => {
+        if (err) {
+            res.status(500).json({ error: err.message });
+        } else {
+            res.json(rows);
+        }
+    });
+});
+
+// Get all periods
+app.get('/api/history/periods', (req, res) => {
+    db.all('SELECT * FROM historical_periods ORDER BY start_year ASC', [], (err, rows) => {
+        if (err) {
+            res.status(500).json({ error: err.message });
+        } else {
+            res.json(rows);
+        }
+    });
+});
+
+// Get historical facts with optional filters
+app.get('/api/history/facts', (req, res) => {
+    const { city_id, topic_id, period_id, search, year, limit = 50 } = req.query;
+
+    let query = `
+        SELECT
+            hf.*,
+            hc.name as city_name,
+            ht.name as topic_name,
+            ht.icon as topic_icon,
+            hp.name as period_name
+        FROM historical_facts hf
+        LEFT JOIN historical_cities hc ON hf.city_id = hc.id
+        LEFT JOIN historical_topics ht ON hf.topic_id = ht.id
+        LEFT JOIN historical_periods hp ON hf.period_id = hp.id
+        WHERE 1=1
+    `;
+    const params = [];
+
+    if (city_id) {
+        query += ' AND hf.city_id = ?';
+        params.push(city_id);
+    }
+    if (topic_id) {
+        query += ' AND hf.topic_id = ?';
+        params.push(topic_id);
+    }
+    if (period_id) {
+        query += ' AND hf.period_id = ?';
+        params.push(period_id);
+    }
+    if (year) {
+        query += ' AND hf.event_year = ?';
+        params.push(year);
+    }
+    if (search) {
+        query += ' AND (hf.title LIKE ? OR hf.content LIKE ?)';
+        const searchTerm = `%${search}%`;
+        params.push(searchTerm, searchTerm);
+    }
+
+    query += ' ORDER BY hf.event_year DESC, hf.importance DESC LIMIT ?';
+    params.push(parseInt(limit));
+
+    db.all(query, params, (err, rows) => {
+        if (err) {
+            res.status(500).json({ error: err.message });
+        } else {
+            res.json(rows);
+        }
+    });
+});
+
+// Get single fact by ID
+app.get('/api/history/facts/:id', (req, res) => {
+    const { id } = req.params;
+    db.get(`
+        SELECT
+            hf.*,
+            hc.name as city_name,
+            ht.name as topic_name,
+            ht.icon as topic_icon
+        FROM historical_facts hf
+        LEFT JOIN historical_cities hc ON hf.city_id = hc.id
+        LEFT JOIN historical_topics ht ON hf.topic_id = ht.id
+        WHERE hf.id = ?
+    `, [id], (err, row) => {
+        if (err) {
+            res.status(500).json({ error: err.message });
+        } else if (!row) {
+            res.status(404).json({ error: 'Fact not found' });
+        } else {
+            res.json(row);
+        }
+    });
+});
+
+// Create new historical fact (for learning from chats)
+app.post('/api/history/facts', (req, res) => {
+    const { title, content, event_date, event_year, city_id, topic_id, period_id, source_name, source_url } = req.body;
+
+    if (!title || !content) {
+        return res.status(400).json({ error: 'Title and content are required' });
+    }
+
+    const stmt = db.prepare(`
+        INSERT INTO historical_facts (title, content, event_date, event_year, city_id, topic_id, period_id, source_name, source_url, is_verified)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+    `);
+
+    stmt.run(title, content, event_date, event_year, city_id, topic_id, period_id, source_name, source_url, function(err) {
+        if (err) {
+            res.status(500).json({ error: err.message });
+        } else {
+            console.log(`✅ Historical fact created: ${title} (ID: ${this.lastID})`);
+            res.status(201).json({
+                id: this.lastID,
+                message: 'Historical fact created successfully',
+                needs_verification: true
+            });
+        }
+    });
+    stmt.finalize();
+});
+
+// ==================== CHAT ROUTES ====================
+
+// Create or get chat conversation
+app.post('/api/history/chat/conversation', (req, res) => {
+    const { session_id, user_ip } = req.body;
+
+    // Check if conversation exists
+    db.get('SELECT * FROM chat_conversations WHERE session_id = ?', [session_id], (err, conversation) => {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+
+        if (conversation) {
+            res.json(conversation);
+        } else {
+            // Create new conversation
+            const stmt = db.prepare(`
+                INSERT INTO chat_conversations (session_id, user_ip)
+                VALUES (?, ?)
+            `);
+
+            stmt.run(session_id, user_ip || 'unknown', function(err) {
+                if (err) {
+                    res.status(500).json({ error: err.message });
+                } else {
+                    res.status(201).json({
+                        id: this.lastID,
+                        session_id: session_id,
+                        message: 'Conversation created'
+                    });
+                }
+            });
+            stmt.finalize();
+        }
+    });
+});
+
+// Get conversation messages
+app.get('/api/history/chat/conversation/:id/messages', (req, res) => {
+    const { id } = req.params;
+
+    db.all(
+        'SELECT * FROM chat_messages WHERE conversation_id = ? ORDER BY created_at ASC',
+        [id],
+        (err, messages) => {
+            if (err) {
+                res.status(500).json({ error: err.message });
+            } else {
+                res.json(messages);
+            }
+        }
+    );
+});
+
+// Save chat message
+app.post('/api/history/chat/message', (req, res) => {
+    const { conversation_id, role, content } = req.body;
+
+    if (!conversation_id || !role || !content) {
+        return res.status(400).json({ error: 'conversation_id, role, and content are required' });
+    }
+
+    const stmt = db.prepare(`
+        INSERT INTO chat_messages (conversation_id, role, content)
+        VALUES (?, ?, ?)
+    `);
+
+    stmt.run(conversation_id, role, content, function(err) {
+        if (err) {
+            res.status(500).json({ error: err.message });
+        } else {
+            // Update message count
+            db.run(
+                'UPDATE chat_conversations SET message_count = message_count + 1 WHERE id = ?',
+                [conversation_id]
+            );
+
+            res.status(201).json({
+                id: this.lastID,
+                message: 'Message saved'
+            });
+        }
+    });
+    stmt.finalize();
+});
+
+// Save learned insight from conversation
+app.post('/api/history/insights', (req, res) => {
+    const { conversation_id, insight, topic_id, city_id } = req.body;
+
+    if (!insight) {
+        return res.status(400).json({ error: 'Insight content is required' });
+    }
+
+    const stmt = db.prepare(`
+        INSERT INTO learned_insights (conversation_id, insight, topic_id, city_id)
+        VALUES (?, ?, ?, ?)
+    `);
+
+    stmt.run(conversation_id, insight, topic_id, city_id, function(err) {
+        if (err) {
+            res.status(500).json({ error: err.message });
+        } else {
+            console.log(`💡 New insight learned: ${insight.substring(0, 50)}...`);
+            res.status(201).json({
+                id: this.lastID,
+                message: 'Insight saved for verification'
+            });
+        }
+    });
+    stmt.finalize();
+});
+
+// Get recent insights
+app.get('/api/history/insights', (req, res) => {
+    const { verified } = req.query;
+
+    let query = `
+        SELECT
+            li.*,
+            hc.name as city_name,
+            ht.name as topic_name
+        FROM learned_insights li
+        LEFT JOIN historical_cities hc ON li.city_id = hc.id
+        LEFT JOIN historical_topics ht ON li.topic_id = ht.id
+    `;
+    const params = [];
+
+    if (verified !== undefined) {
+        query += ' WHERE li.needs_verification = ?';
+        params.push(verified === 'true' ? 0 : 1);
+    }
+
+    query += ' ORDER BY li.created_at DESC LIMIT 50';
+
+    db.all(query, params, (err, rows) => {
+        if (err) {
+            res.status(500).json({ error: err.message });
+        } else {
+            res.json(rows);
+        }
+    });
+});
+
+// Chat with AI agent
+app.post('/api/history/chat', async (req, res) => {
+    const { message, conversation_id, session_id } = req.body;
+
+    if (!message) {
+        return res.status(400).json({ error: 'Message is required' });
+    }
+
+    try {
+        // Get AI response
+        const result = await chatWithAgent(message, conversation_id);
+
+        // Save message to database if conversation_id provided
+        if (conversation_id) {
+            // Save user message
+            db.run(
+                'INSERT INTO chat_messages (conversation_id, role, content) VALUES (?, ?, ?)',
+                [conversation_id, 'user', message]
+            );
+
+            // Save AI response
+            db.run(
+                'INSERT INTO chat_messages (conversation_id, role, content) VALUES (?, ?, ?)',
+                [conversation_id, 'assistant', result.response]
+            );
+
+            // Update message count
+            db.run(
+                'UPDATE chat_conversations SET message_count = message_count + 2 WHERE id = ?',
+                [conversation_id]
+            );
+
+            // Check if user shared interesting historical information
+            const { HistoryChatAgent } = require('./history-chat-agent');
+            const agent = new HistoryChatAgent();
+            agent.conversationId = conversation_id;
+            const insightCheck = await agent.extractInsights(message, result.response);
+
+            if (insightCheck.shouldSave) {
+                await agent.saveInsight(insightCheck.insight, insightCheck.cityId);
+                console.log(`💡 Captured user insight for review: "${insightCheck.insight.substring(0, 60)}..."`);
+            }
+        }
+
+        res.json({
+            response: result.response,
+            success: result.success,
+            context_used: result.context_used,
+            conversation_id: conversation_id
+        });
+
+    } catch (error) {
+        console.error('Error in chat endpoint:', error);
+        res.status(500).json({
+            error: 'Failed to process chat message',
+            details: error.message
+        });
+    }
 });
 
 // ==================== SERVER START ====================
