@@ -1,9 +1,30 @@
 const axios = require('axios');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const { HttpsProxyAgent } = require('https-proxy-agent');
+const fs = require('fs');
+const os = require('os');
 
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
-const MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
+// Check for Ollama config file where authentication is stored after `ollama login`
+const ollamaConfigPath = path.join(os.homedir(), '.ollama', 'config.json');
+let ollamaConfig = {};
+
+try {
+    if (fs.existsSync(ollamaConfigPath)) {
+        ollamaConfig = JSON.parse(fs.readFileSync(ollamaConfigPath, 'utf8'));
+    }
+} catch (err) {
+    console.log('⚠️  No Ollama config found. Run `ollama login` to authenticate.');
+}
+
+const OLLAMA_URL = process.env.OLLAMA_URL || ollamaConfig.api_url || 'https://ollama.com';
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || ollamaConfig.api_key || null;
+const MODEL = process.env.OLLAMA_MODEL || 'gpt-oss:20b-cloud';
+
+console.log(`🔧 Ollama Configuration:`);
+console.log(`   URL: ${OLLAMA_URL}`);
+console.log(`   Model: ${MODEL}`);
+console.log(`   Authenticated: ${OLLAMA_API_KEY ? '✓ Yes' : '✗ Run ollama login'}`);
 
 const dbPath = path.join(__dirname, 'database.sqlite');
 const db = new sqlite3.Database(dbPath);
@@ -152,6 +173,24 @@ Remember: You're helping people discover and appreciate Southeast Texas heritage
                 }
             ];
 
+            // Prepare headers (include Authorization if API key is provided)
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+
+            if (OLLAMA_API_KEY) {
+                headers['Authorization'] = `Bearer ${OLLAMA_API_KEY}`;
+            }
+
+            // Configure proxy if needed
+            const axiosConfig = { headers };
+
+            if (process.env.HTTPS_PROXY || process.env.https_proxy) {
+                const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy;
+                axiosConfig.httpsAgent = new HttpsProxyAgent(proxyUrl);
+                axiosConfig.proxy = false; // Disable axios default proxy handling
+            }
+
             // Call Ollama API
             const response = await axios.post(`${OLLAMA_URL}/api/chat`, {
                 model: MODEL,
@@ -161,7 +200,7 @@ Remember: You're helping people discover and appreciate Southeast Texas heritage
                     temperature: 0.7,
                     top_p: 0.9
                 }
-            });
+            }, axiosConfig);
 
             const aiResponse = response.data.message.content;
 
