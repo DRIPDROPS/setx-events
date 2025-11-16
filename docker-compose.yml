@@ -7,10 +7,6 @@ services:
     ports:
       - "3001:3001"  # API
       - "8081:8081"  # Frontend
-    environment:
-      - OLLAMA_URL=https://ollama.com
-      - OLLAMA_API_KEY=6f15669254714b3782a3ca496f117335.Rdkn59O-KUskGeWjfiVux3OQ
-      - OLLAMA_MODEL=gpt-oss:20b-cloud
     volumes:
       - ./database.sqlite:/app/database.sqlite
       - ./logs:/app/logs
